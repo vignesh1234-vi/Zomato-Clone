@@ -11,7 +11,7 @@ const Header = () => {
   return (
     <div className="header">
       <nav>
-        <span>Get the App</span>
+        <span>Get the Ap</span>
         <div className="right">
           <span>Investor Relations</span>
           <span>Add restaurant</span>
