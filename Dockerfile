@@ -1,4 +1,4 @@
-# Step 1: Build stage
+## Step 1: Build stage
 FROM node:16-slim AS build
 WORKDIR /app
 
