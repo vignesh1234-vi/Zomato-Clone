@@ -1,0 +1,21 @@
+name: Deploy Test
+
+on:
+  push:
+    branches-ignore:
+      - main
+
+jobs:
+  deploy-test:
+    runs-on: ubuntu-latest
+    environment: test
+
+    steps:
+      - name: Deploy to Test Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            /srv/zomato/test/deploy.sh "${{ github.ref_name }}"
