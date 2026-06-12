@@ -8,14 +8,46 @@ on:
 jobs:
   deploy-test:
     runs-on: ubuntu-latest
-    environment: test
 
     steps:
-      - name: Deploy to Test Server
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Pull Latest Code
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
-            /srv/zomato/test/deploy.sh "${{ github.ref_name }}"
+            cd /home/ubuntu/zomato-test
+            git fetch origin
+            git reset --hard origin/${{ github.ref_name }}
+
+      - name: Build and Deploy Docker Container
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /home/ubuntu/zomato-test
+
+            TIMESTAMP=$(date +%d%m%Y-%H%M%S)
+            COMMIT=$(git rev-parse --short HEAD)
+
+            IMAGE_NAME="zomato-test:${TIMESTAMP}-${COMMIT}"
+
+            echo "Building Image: $IMAGE_NAME"
+
+            docker build -t "$IMAGE_NAME" .
+
+            docker stop zomato-test || true
+            docker rm zomato-test || true
+
+            docker run -d \
+              --name zomato-test \
+              -p 80:80 \
+              "$IMAGE_NAME"
+
+            echo "Deployment Successful"
