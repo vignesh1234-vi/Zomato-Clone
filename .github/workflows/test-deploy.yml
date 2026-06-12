@@ -50,4 +50,4 @@ jobs:
               -p 80:80 \
               "$IMAGE_NAME"
 
-            echo "Deployment Successfull"
+            echo "Deployment Successful"
