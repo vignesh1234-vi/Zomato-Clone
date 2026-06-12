@@ -47,7 +47,7 @@ jobs:
 
             docker run -d \
               --name zomato-test \
-              -p 80:80 \
+              -p 3201:80 \
               "$IMAGE_NAME"
 
             echo "Deployment Successful"
