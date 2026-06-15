@@ -1,156 +1,121 @@
-name: Deploy Test
+name: Test and Production Deployment
 
 on:
   push:
-    branches-ignore:
-      - main
+    branches:
+      - '**'
 
 jobs:
+
   deploy-test:
-    runs-on: ubuntu-latest
-    environment: test
+    if: github.ref_name != 'main'
+    runs-on: [self-hosted, docker]
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Determine Active Slot
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            ACTIVE_SLOT=$(cat /home/ubuntu/zomato-test/active.txt 2>/dev/null || echo blue)
+      - name: Deployment Details
+        run: |
+          echo "=================================="
+          echo "Branch Name : ${{ github.ref_name }}"
+          echo "Commit ID   : ${GITHUB_SHA::7}"
+          echo "Environment : TEST"
+          echo "=================================="
 
-            if [ "$ACTIVE_SLOT" = "blue" ]; then
-              echo "Deploying to green"
-            else
-              echo "Deploying to blue"
-            fi
+      - name: Generate Image Tag
+        run: |
+          TAG=$(date +'%Y%m%d-%H%M%S')-${GITHUB_SHA::7}
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "Image Tag : $TAG"
 
-      - name: Pull Latest Code
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            cd /home/ubuntu/zomato-test
-            git fetch origin
-            git reset --hard origin/${{ github.ref_name }}
+      - name: Build Test Image
+        run: |
+          docker build -t myapp-test:${TAG} .
 
-      - name: Build Docker Image
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            cd /home/ubuntu/zomato-test
+      - name: Backup Existing Test Container
+        run: |
+          docker stop myapp-test || true
+          docker rename myapp-test myapp-test-backup || true
 
-            TIMESTAMP=$(date +%d%m%Y-%H%M%S)
-            COMMIT=$(git rev-parse --short HEAD)
-
-            docker build -t zomato-test:${TIMESTAMP}-${COMMIT} .
-
-      - name: Deploy Inactive Slot
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            ACTIVE_SLOT=$(cat /home/ubuntu/zomato-test/active.txt)
-
-            if [ "$ACTIVE_SLOT" = "blue" ]; then
-              NEW_SLOT=green
-              NEW_PORT=3102
-            else
-              NEW_SLOT=blue
-              NEW_PORT=3101
-            fi
-
-            docker rm -f zomato-test-$NEW_SLOT || true
-
-            IMAGE=$(docker images zomato-test --format "{{.Repository}}:{{.Tag}}" | sort -r | head -1)
-
-            docker run -d \
-              --restart unless-stopped \
-              --name zomato-test-$NEW_SLOT \
-              -p ${NEW_PORT}:80 \
-              $IMAGE
+      - name: Start New Test Container
+        run: |
+          docker run -d \
+            --name myapp-test \
+            -p 8081:80 \
+            myapp-test:${TAG}
 
       - name: Health Check
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            ACTIVE_SLOT=$(cat /home/ubuntu/zomato-test/active.txt)
+        run: |
+          sleep 20
+          curl -f http://localhost:8081
 
-            if [ "$ACTIVE_SLOT" = "blue" ]; then
-              NEW_PORT=3102
-            else
-              NEW_PORT=3101
-            fi
+      - name: Remove Backup Container
+        if: success()
+        run: |
+          docker rm -f myapp-test-backup || true
 
-            sleep 15
+      - name: Rollback to Old Backup Container
+        if: failure()
+        run: |
+          docker rm -f myapp-test || true
+          docker rename myapp-test-backup myapp-test || true
+          docker start myapp-test || true
 
-            curl -f http://127.0.0.1:${NEW_PORT}
+  deploy-prod:
+    if: github.ref_name == 'main'
+    runs-on: [self-hosted, docker]
 
-      - name: Switch NGINX
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            ACTIVE_SLOT=$(cat /home/ubuntu/zomato-test/active.txt)
+    environment:
+      name: production
 
-            if [ "$ACTIVE_SLOT" = "blue" ]; then
-              OLD_PORT=3101
-              NEW_PORT=3102
-            else
-              OLD_PORT=3102
-              NEW_PORT=3101
-            fi
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-            sudo sed -i "s/127.0.0.1:${OLD_PORT}/127.0.0.1:${NEW_PORT}/g" /etc/nginx/sites-available/zomato-test.conf
+      - name: Deployment Details
+        run: |
+          echo "=================================="
+          echo "Branch Name : ${{ github.ref_name }}"
+          echo "Commit ID   : ${GITHUB_SHA::7}"
+          echo "Environment : PROD"
+          echo "=================================="
 
-            sudo nginx -t
-            sudo systemctl reload nginx
+      - name: Generate Image Tag
+        run: |
+          TAG=$(date +'%Y%m%d-%H%M%S')-${GITHUB_SHA::7}
+          echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "Image Tag : $TAG"
 
-      - name: Update Metadata
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            ACTIVE_SLOT=$(cat /home/ubuntu/zomato-test/active.txt)
+      - name: Build Production Image
+        run: |
+          docker build -t myapp-prod:${TAG} .
 
-            if [ "$ACTIVE_SLOT" = "blue" ]; then
-              NEW_SLOT=green
-            else
-              NEW_SLOT=blue
-            fi
+      - name: Backup Existing Production Container
+        run: |
+          docker stop myapp-prod || true
+          docker rename myapp-prod myapp-prod-backup || true
 
-            echo "$NEW_SLOT" > /home/ubuntu/zomato-test/active.txt
+      - name: Start New Production Container
+        run: |
+          docker run -d \
+            --name myapp-prod \
+            -p 80:80 \
+            myapp-prod:${TAG}
 
-            cat > /home/ubuntu/zomato-test/current-release.txt <<EOF
-            BRANCH=${{ github.ref_name }}
-            SLOT=$NEW_SLOT
-            ACTION=DEPLOY
-            DEPLOYED_AT=$(date)
-            EOF
+      - name: Health Check
+        run: |
+          sleep 20
+          curl -f http://localhost
 
-      - name: Send Email
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            cat /home/ubuntu/zomato-test/current-release.txt | mail -s "Zomato Test Deployment Updated" vigneshm@datatemplate.com,vaishnavins@datatemplate.com
+      - name: Remove Backup Container
+        if: success()
+        run: |
+          docker rm -f myapp-prod-backup || true
+
+      - name: Rollback to Old Backup Container
+        if: failure()
+        run: |
+          docker rm -f myapp-prod || true
+          docker rename myapp-prod-backup myapp-prod || true
+          docker start myapp-prod || true
