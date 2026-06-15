@@ -1,37 +1,40 @@
-name: Test Deployment
+name: Runner Test
 
 on:
   push:
-    branches-ignore:
-      - main
+    branches:
+      - feature-api
+      - feature-api2
 
 jobs:
-  deploy:
-    runs-on: self-hosted
+  test:
+    runs-on: [self-hosted, docker]
 
     steps:
-      - name: Checkout Source Code
+      - name: Checkout Code
         uses: actions/checkout@v4
+
+      - name: Runner Information
+        run: |
+          echo "===== Runner Info ====="
+          hostname
+          whoami
+          pwd
+
+      - name: Docker Version
+        run: |
+          docker --version
+
+      - name: Docker Containers
+        run: |
+          docker ps
+
+      - name: Branch Information
+        run: |
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Commit: ${GITHUB_SHA::7}"
 
       - name: Generate Image Tag
         run: |
-          echo "IMAGE_TAG=test-$(date +'%d%m%Y-%H%M%S')-${GITHUB_SHA::7}" >> $GITHUB_ENV
-
-      - name: Build Docker Image
-        run: |
-          docker build -t myapp-test:${IMAGE_TAG} .
-
-      - name: Stop Existing Test Container
-        run: |
-          docker stop myapp-test || true
-          docker rm myapp-test || true
-
-      - name: Run Test Container
-        run: |
-          docker run -d \
-            --name myapp-test \
-            -p 8080:80 \
-            myapp-test:${IMAGE_TAG}
-
-      - name: Verify Deployment
-        run: docker ps
+          TAG=$(date +'%Y%m%d-%H%M%S')-${GITHUB_SHA::7}
+          echo "Generated Tag: $TAG"
