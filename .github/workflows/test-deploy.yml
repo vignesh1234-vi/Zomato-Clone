@@ -1,4 +1,4 @@
-name: Docker Build Test
+name: Test and Production Deployment
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
 
-  build-test:
+  deploy-test:
     if: github.ref_name != 'main'
     runs-on: [self-hosted, docker]
 
@@ -20,15 +20,84 @@ jobs:
           TAG=$(date +'%Y%m%d-%H%M%S')-${GITHUB_SHA::7}
           echo "TAG=$TAG" >> $GITHUB_ENV
 
-      - name: Show Branch
-        run: |
-          echo "Branch: ${{ github.ref_name }}"
-          echo "Image Tag: ${TAG}"
-
-      - name: Build Docker Image
+      - name: Build Test Image
         run: |
           docker build -t myapp-test:${TAG} .
 
-      - name: Verify Image
+      - name: Backup Existing Test Container
         run: |
-          docker images | grep myapp-test
+          docker stop myapp-test || true
+          docker rename myapp-test myapp-test-backup || true
+
+      - name: Start New Test Container
+        run: |
+          docker run -d \
+            --name myapp-test \
+            -p 8081:80 \
+            myapp-test:${TAG}
+
+      - name: Health Check
+        run: |
+          sleep 20
+          curl -f http://localhost:8081
+
+      - name: Remove Backup Container
+        if: success()
+        run: |
+          docker rm -f myapp-test-backup || true
+
+      - name: Rollback
+        if: failure()
+        run: |
+          docker rm -f myapp-test || true
+          docker rename myapp-test-backup myapp-test || true
+          docker start myapp-test || true
+
+  deploy-prod:
+    if: github.ref_name == 'main'
+    runs-on: [self-hosted, docker]
+
+    environment:
+      name: production
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Generate Image Tag
+        run: |
+          TAG=$(date +'%Y%m%d-%H%M%S')-${GITHUB_SHA::7}
+          echo "TAG=$TAG" >> $GITHUB_ENV
+
+      - name: Build Production Image
+        run: |
+          docker build -t myapp-prod:${TAG} .
+
+      - name: Backup Existing Production Container
+        run: |
+          docker stop myapp-prod || true
+          docker rename myapp-prod myapp-prod-backup || true
+
+      - name: Start New Production Container
+        run: |
+          docker run -d \
+            --name myapp-prod \
+            -p 80:80 \
+            myapp-prod:${TAG}
+
+      - name: Health Check
+        run: |
+          sleep 20
+          curl -f http://localhost
+
+      - name: Remove Backup Container
+        if: success()
+        run: |
+          docker rm -f myapp-prod-backup || true
+
+      - name: Rollback
+        if: failure()
+        run: |
+          docker rm -f myapp-prod || true
+          docker rename myapp-prod-backup myapp-prod || true
+          docker start myapp-prod || true
