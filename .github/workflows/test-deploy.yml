@@ -1,53 +1,103 @@
-name: Deploy Test
+name: Test and Production Deployment
 
 on:
   push:
-    branches-ignore:
-      - main
+    branches:
+      - '**'
 
 jobs:
+
   deploy-test:
-    runs-on: ubuntu-latest
+    if: github.ref_name != 'main'
+    runs-on: [self-hosted, docker]
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Pull Latest Code
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            cd /home/ubuntu/zomato-test
-            git fetch origin
-            git reset --hard origin/${{ github.ref_name }}
+      - name: Generate Image Tag
+        run: |
+          TAG=$(date +'%Y%m%d-%H%M%S')-${GITHUB_SHA::7}
+          echo "TAG=$TAG" >> $GITHUB_ENV
 
-      - name: Build and Deploy Docker Container
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            cd /home/ubuntu/zomato-test
+      - name: Build Test Image
+        run: |
+          docker build -t myapp-test:${TAG} .
 
-            TIMESTAMP=$(date +%d%m%Y-%H%M%S)
-            COMMIT=$(git rev-parse --short HEAD)
+      - name: Backup Existing Test Container
+        run: |
+          docker stop myapp-test || true
+          docker rename myapp-test myapp-test-backup || true
 
-            IMAGE_NAME="zomato-test:${TIMESTAMP}-${COMMIT}"
+      - name: Start New Test Container
+        run: |
+          docker run -d \
+            --name myapp-test \
+            -p 8081:80 \
+            myapp-test:${TAG}
 
-            echo "Building Image: $IMAGE_NAME"
+      - name: Health Check
+        run: |
+          sleep 20
+          curl -f http://localhost:8081
 
-            docker build -t "$IMAGE_NAME" .
+      - name: Remove Backup Container
+        if: success()
+        run: |
+          docker rm -f myapp-test-backup || true
 
-            docker stop zomato-test || true
-            docker rm zomato-test || true
+      - name: Rollback
+        if: failure()
+        run: |
+          docker rm -f myapp-test || true
+          docker rename myapp-test-backup myapp-test || true
+          docker start myapp-test || true
 
-            docker run -d \
-              --name zomato-test \
-              -p 3201:80 \
-              "$IMAGE_NAME"
+  deploy-prod:
+    if: github.ref_name == 'main'
+    runs-on: [self-hosted, docker]
 
-            echo "Deployment Successful"
+    environment:
+      name: production
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Generate Image Tag
+        run: |
+          TAG=$(date +'%Y%m%d-%H%M%S')-${GITHUB_SHA::7}
+          echo "TAG=$TAG" >> $GITHUB_ENV
+
+      - name: Build Production Image
+        run: |
+          docker build -t myapp-prod:${TAG} .
+
+      - name: Backup Existing Production Container
+        run: |
+          docker stop myapp-prod || true
+          docker rename myapp-prod myapp-prod-backup || true
+
+      - name: Start New Production Container
+        run: |
+          docker run -d \
+            --name myapp-prod \
+            -p 80:80 \
+            myapp-prod:${TAG}
+
+      - name: Health Check
+        run: |
+          sleep 20
+          curl -f http://localhost
+
+      - name: Remove Backup Container
+        if: success()
+        run: |
+          docker rm -f myapp-prod-backup || true
+
+      - name: Rollback to old backup container
+        if: failure()
+        run: |
+          docker rm -f myapp-prod || true
+          docker rename myapp-prod-backup myapp-prod || true
+          docker start myapp-prod || true
