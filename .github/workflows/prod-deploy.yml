@@ -95,7 +95,7 @@ jobs:
         run: |
           docker rm -f myapp-prod-backup || true
 
-      - name: Rollback to old
+      - name: Rollback to old backup container
         if: failure()
         run: |
           docker rm -f myapp-prod || true
