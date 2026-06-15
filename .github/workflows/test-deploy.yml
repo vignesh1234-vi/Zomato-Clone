@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - feature-api
-      - feature-api2
+      - feature-api3
 
 jobs:
   test:
