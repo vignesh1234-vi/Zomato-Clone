@@ -15,10 +15,19 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Deployment Details
+        run: |
+          echo "=================================="
+          echo "Branch Name : ${{ github.ref_name }}"
+          echo "Commit ID   : ${GITHUB_SHA::7}"
+          echo "Environment : TEST"
+          echo "=================================="
+
       - name: Generate Image Tag
         run: |
           TAG=$(date +'%Y%m%d-%H%M%S')-${GITHUB_SHA::7}
           echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "Image Tag : $TAG"
 
       - name: Build Test Image
         run: |
@@ -46,7 +55,7 @@ jobs:
         run: |
           docker rm -f myapp-test-backup || true
 
-      - name: Rollback
+      - name: Rollback to Old Backup Container
         if: failure()
         run: |
           docker rm -f myapp-test || true
@@ -64,10 +73,19 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Deployment Details
+        run: |
+          echo "=================================="
+          echo "Branch Name : ${{ github.ref_name }}"
+          echo "Commit ID   : ${GITHUB_SHA::7}"
+          echo "Environment : PROD"
+          echo "=================================="
+
       - name: Generate Image Tag
         run: |
           TAG=$(date +'%Y%m%d-%H%M%S')-${GITHUB_SHA::7}
           echo "TAG=$TAG" >> $GITHUB_ENV
+          echo "Image Tag : $TAG"
 
       - name: Build Production Image
         run: |
@@ -95,7 +113,7 @@ jobs:
         run: |
           docker rm -f myapp-prod-backup || true
 
-      - name: Rollback to old
+      - name: Rollback to Old Backup Container
         if: failure()
         run: |
           docker rm -f myapp-prod || true
